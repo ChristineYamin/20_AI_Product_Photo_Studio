@@ -1,6 +1,11 @@
 import streamlit as st
 from PIL import Image
 from rembg import remove
+from io import BytesIO
+
+
+
+
 
 st.set_page_config(
     page_title="AI Product Photo Studio",
@@ -55,3 +60,13 @@ if uploaded_file is not None:
 
     st.subheader("Background Test")
     st.image(colour_preview, width="stretch")
+
+    image_buffer = BytesIO()
+    colour_preview.save(image_buffer, format="PNG")
+
+    st.download_button(
+        label="Download Product Image",
+        data=image_buffer.getvalue(),
+        file_name="product_photo.png",
+        mime="image/png",
+    )
