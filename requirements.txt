@@ -3,3 +3,7 @@ Pillow
 rembg[cpu]
 huggingface-hub
 python-dotenv
+torch
+torchvision
+transformers
+streamlit-image-coordinates

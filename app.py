@@ -1,6 +1,12 @@
 import hashlib
 import os
 from io import BytesIO
+import torch
+
+from transformers import Sam2Model, Sam2Processor
+from streamlit_image_coordinates import (
+    streamlit_image_coordinates,
+)
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -16,7 +22,119 @@ from rembg import remove
 
 
 load_dotenv()
+SAM2_MODEL_NAME = "facebook/sam2.1-hiera-tiny"
 
+
+@st.cache_resource
+def load_sam2_model():
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "cpu"
+    )
+
+    token = os.getenv("HF_TOKEN")
+
+    processor = Sam2Processor.from_pretrained(
+        SAM2_MODEL_NAME,
+        token=token,
+    )
+
+    model = Sam2Model.from_pretrained(
+        SAM2_MODEL_NAME,
+        token=token,
+    )
+
+    model.to(device)
+    model.eval()
+
+    return processor, model, device
+@st.cache_data(show_spinner=False)
+def remove_background_with_sam2(
+    image_bytes,
+    selected_point,
+):
+    processor, model, device = load_sam2_model()
+
+    image = Image.open(
+        BytesIO(image_bytes)
+    ).convert("RGB")
+
+    point_list = [
+        [int(x), int(y)]
+        for x, y in selected_point
+    ]
+
+    input_points = [
+        [
+            point_list,
+        ]
+    ]
+
+    input_labels = [
+        [
+            [1] * len(point_list),
+        ]
+    ]
+
+
+
+    inputs = processor(
+        images=image,
+        input_points=input_points,
+        input_labels=input_labels,
+        return_tensors="pt",
+    ).to(device)
+
+    with torch.no_grad():
+        outputs = model(
+            **inputs,
+            multimask_output=True,
+        )
+
+    processed_masks = processor.post_process_masks(
+        outputs.pred_masks.cpu(),
+        inputs["original_sizes"].cpu(),
+    )[0]
+
+    quality_scores = outputs.iou_scores[
+        0,
+        0,
+    ].cpu()
+
+    best_mask_index = int(
+        torch.argmax(quality_scores)
+    )
+
+    best_mask = processed_masks[
+        0,
+        best_mask_index,
+    ]
+
+    mask_array = (
+        (best_mask > 0)
+        .to(torch.uint8)
+        .numpy()
+        * 255
+    )
+
+    mask_image = Image.fromarray(
+        mask_array
+    ).convert("L")
+
+    mask_image = mask_image.filter(
+        ImageFilter.MedianFilter(size=5)
+    )
+
+    # Slightly soften the mask edges
+    mask_image = mask_image.filter(
+        ImageFilter.GaussianBlur(radius=1)
+    )
+
+    transparent_product = image.convert("RGBA")
+    transparent_product.putalpha(mask_image)
+
+    return transparent_product
 
 @st.cache_data(show_spinner=False)
 def remove_image_background(image_bytes):
@@ -225,17 +343,137 @@ if (
     st.session_state.get("uploaded_signature")
     != file_signature
 ):
+    
+    
     st.session_state.uploaded_signature = file_signature
+
+
     st.session_state.pop(
         "generated_background",
         None,
     )
 
+    st.session_state.pop("sam_points", None)
+    st.session_state.pop("last_sam_click", None)
 
-with st.spinner("Removing the background..."):
-    transparent_image = remove_image_background(
-        uploaded_bytes
+selection_method = st.radio(
+    "Product selection method",
+    options=[
+        "Automatic",
+        "Click Product — SAM 2",
+    ],
+    horizontal=True,
+)
+
+if selection_method == "Click Product — SAM 2":
+    st.subheader("Select the Product")
+
+    st.write(
+        "Click different parts of the product. "
+        "For this perfume, click the bottle and the cap."
     )
+
+    if "sam_points" not in st.session_state:
+        st.session_state.sam_points = []
+
+    if "sam_click_version" not in st.session_state:
+        st.session_state.sam_click_version = 0
+
+    if st.button("Clear Selection Points"):
+        st.session_state.sam_points = []
+        st.session_state.sam_click_version += 1
+        st.session_state.pop(
+            "last_sam_click",
+            None,
+        )
+        st.rerun()
+
+    selection_image = product_image.convert("RGB").copy()
+
+    selection_image.thumbnail(
+        (700, 700),
+        Image.Resampling.LANCZOS,
+    )
+
+    click_result = streamlit_image_coordinates(
+        selection_image,
+        key=(
+            f"sam_click_{file_signature}_"
+            f"{st.session_state.sam_click_version}"
+        ),
+    )
+
+    if click_result is not None:
+        click_signature = click_result.get(
+            "unix_time",
+            (
+                click_result["x"],
+                click_result["y"],
+            ),
+        )
+
+        if (
+            st.session_state.get("last_sam_click")
+            != click_signature
+        ):
+            original_x = int(
+                click_result["x"]
+                * product_image.width
+                / selection_image.width
+            )
+
+            original_y = int(
+                click_result["y"]
+                * product_image.height
+                / selection_image.height
+            )
+
+            st.session_state.sam_points.append(
+                (original_x, original_y)
+            )
+
+            st.session_state.last_sam_click = (
+                click_signature
+            )
+
+    if st.session_state.sam_points:
+        st.success(
+            f"{len(st.session_state.sam_points)} "
+            "selection point(s) added."
+        )
+
+        st.write(
+            "Selected coordinates:",
+            st.session_state.sam_points,
+        )
+
+    else:
+        st.info(
+            "Click at least one part of the product."
+        )
+        st.stop()
+
+
+if selection_method == "Click Product — SAM 2":
+    with st.spinner(
+        "SAM 2 is selecting your product..."
+    ):
+        transparent_image = (
+            remove_background_with_sam2(
+                uploaded_bytes,
+                tuple(st.session_state.sam_points),
+            )
+        )
+
+else:
+    with st.spinner(
+        "Removing the background automatically..."
+    ):
+        transparent_image = (
+            remove_image_background(
+                uploaded_bytes
+            )
+        )
 
 
 with st.expander("View image preparation", expanded=False):
