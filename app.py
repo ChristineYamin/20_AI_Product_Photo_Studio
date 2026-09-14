@@ -360,6 +360,10 @@ with ai_tab:
                     )
 
     if "generated_background" in st.session_state:
+        if st.button("Clear AI Background"):
+            del st.session_state.generated_background
+            st.rerun()
+    if "generated_background" in st.session_state:
         generated_background = (
             st.session_state.generated_background
         )
