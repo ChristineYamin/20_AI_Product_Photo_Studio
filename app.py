@@ -2,8 +2,13 @@ import hashlib
 import os
 from io import BytesIO
 import torch
-
-from transformers import Sam2Model, Sam2Processor
+import numpy as np
+from transformers import (
+    Sam2Model,
+    Sam2Processor,
+    AutoImageProcessor,
+    AutoModelForDepthEstimation,
+)
 from streamlit_image_coordinates import (
     streamlit_image_coordinates,
 )
@@ -24,6 +29,32 @@ from rembg import remove
 load_dotenv()
 SAM2_MODEL_NAME = "facebook/sam2.1-hiera-tiny"
 
+DEPTH_MODEL_NAME = "depth-anything/Depth-Anything-V2-Small-hf"
+
+@st.cache_resource
+def load_depth_model():
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "cpu"
+    )
+
+    token = os.getenv("HF_TOKEN")
+
+    processor = AutoImageProcessor.from_pretrained(
+        DEPTH_MODEL_NAME,
+        token=token,
+    )
+
+    model = AutoModelForDepthEstimation.from_pretrained(
+        DEPTH_MODEL_NAME,
+        token=token,
+    )
+
+    model.to(device)
+    model.eval()
+
+    return processor, model, device
 
 @st.cache_resource
 def load_sam2_model():
