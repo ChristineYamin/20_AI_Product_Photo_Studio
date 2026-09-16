@@ -37,7 +37,7 @@ model.eval()
 print("Depth Anything V2 loaded successfully!")
 
 project_folder = Path(__file__).resolve().parent
-image_path = project_folder / "test_background.jpeg"
+image_path = project_folder / "test_background.jpg"
 
 image = Image.open(image_path).convert("RGB")
 
@@ -110,8 +110,8 @@ smoothed_depth = np.convolve(
 depth_change = np.gradient(smoothed_depth)
 
 # Search for a possible rear surface boundary.
-search_start = int(height * 0.25)
-search_end = int(height * 0.60)
+search_start = int(height * 0.55)
+search_end = int(height * 0.90)
 
 boundary_y = search_start + int(
     np.argmax(depth_change[search_start:search_end])

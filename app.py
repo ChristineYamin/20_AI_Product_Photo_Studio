@@ -31,6 +31,41 @@ SAM2_MODEL_NAME = "facebook/sam2.1-hiera-tiny"
 
 DEPTH_MODEL_NAME = "depth-anything/Depth-Anything-V2-Small-hf"
 
+
+@st.cache_data(show_spinner=False)
+def estimate_background_depth(background_bytes):
+    processor, model, device = load_depth_model()
+
+    image = Image.open(
+        BytesIO(background_bytes)
+    ).convert("RGB")
+
+    inputs = processor(
+        images=image,
+        return_tensors="pt",
+    ).to(device)
+
+    with torch.inference_mode():
+        outputs = model(**inputs)
+
+    depth_tensor = torch.nn.functional.interpolate(
+        outputs.predicted_depth.unsqueeze(1),
+        size=(image.height, image.width),
+        mode="bicubic",
+        align_corners=False,
+    )[0, 0]
+
+    depth_array = depth_tensor.cpu().numpy()
+
+    if not np.isfinite(depth_array).all():
+        raise ValueError("The depth prediction contains invalid values.")
+
+    return depth_array
+
+
+
+
+
 @st.cache_resource
 def load_depth_model():
     device = (
@@ -55,6 +90,71 @@ def load_depth_model():
     model.eval()
 
     return processor, model, device
+
+
+def suggest_surface_position(depth_array):
+    """Suggest a contact position—not guaranteed table detection."""
+    height, width = depth_array.shape
+
+    central_depth = depth_array[
+        :,
+        int(width * 0.35):int(width * 0.65),
+    ]
+
+    row_depth = np.median(central_depth, axis=1)
+
+    # Reject depth maps with no useful variation.
+    if float(np.ptp(row_depth)) < 1e-8:
+        raise ValueError(
+            "No useful depth variation was found. "
+            "Please position the product manually."
+        )
+
+    window_size = 15
+    padding = window_size // 2
+
+    smoothed_depth = np.convolve(
+        np.pad(
+            row_depth,
+            (padding, padding),
+            mode="edge",
+        ),
+        np.ones(window_size) / window_size,
+        mode="valid",
+    )
+
+    depth_change = np.gradient(smoothed_depth)
+
+    # Prefer a large foreground support surface.
+    search_start = int(height * 0.55)
+    search_end = int(height * 0.90)
+
+    candidate_changes = depth_change[
+        search_start:search_end
+    ]
+
+    if float(candidate_changes.max()) <= 0:
+        raise ValueError(
+            "No suitable depth boundary was found. "
+            "Please position the product manually."
+        )
+
+    boundary_y = search_start + int(
+        np.argmax(candidate_changes)
+    )
+
+    suggested_y = min(
+        height - 1,
+        boundary_y + int(height * 0.10),
+    )
+
+    return int(
+        np.clip(
+            round(suggested_y / height * 100),
+            20,
+            100,
+        )
+    )
 
 @st.cache_resource
 def load_sam2_model():
@@ -318,7 +418,6 @@ def place_product_on_background(
     product_layer.paste(
         resized_product,
         (x_position, y_position),
-        resized_product,
     )
 
     background_with_shadow = Image.alpha_composite(
@@ -671,11 +770,50 @@ with ai_tab:
                 value=25,
             )
 
+            if st.button("Suggest Surface Placement"):
+                try:
+                    with st.spinner("Estimating surface position..."):
+                        detection_background = ImageOps.fit(
+                            generated_background.convert("RGB"),
+                            output_formats[selected_format],
+                            method=Image.Resampling.LANCZOS,
+                        )
+
+                        depth_array = estimate_background_depth(
+                            image_to_bytes(detection_background)
+                        )
+
+                        suggested_position = suggest_surface_position(
+                            depth_array
+                        )
+
+                    # Set these before creating their sliders.
+                    st.session_state.horizontal_position = 50
+                    st.session_state.vertical_position = (
+                        suggested_position
+                    )
+
+                    st.success(
+                        f"Suggested product bottom: "
+                        f"{suggested_position}%"
+                    )
+
+                except Exception as error:
+                    st.warning(
+                        f"Placement suggestion failed: {error}"
+                    )
+
+            st.caption(
+                "Depth-based suggestion, not guaranteed table "
+                "detection. Adjust manually if needed."
+            )
+
             horizontal_position = st.slider(
                 "Horizontal position",
                 min_value=0,
                 max_value=100,
                 value=50,
+                key="horizontal_position",
             )
 
             vertical_position = st.slider(
@@ -683,7 +821,10 @@ with ai_tab:
                 min_value=20,
                 max_value=100,
                 value=70,
+                key="vertical_position",
             )
+
+            
 
             brightness = st.slider(
                 "Product brightness",
