@@ -672,13 +672,95 @@ with solid_tab:
 with ai_tab:
     st.subheader("Generate an AI Background")
 
-    background_prompt = st.text_area(
-        "Describe the background",
-        placeholder=(
-            "A warm wooden café table with soft "
-            "natural morning light"
-        ),
+    product_type = st.selectbox(
+        "Product type",
+        [
+            "Perfume",
+            "Cosmetics",
+            "Jewellery",
+            "Food",
+            "Electronics",
+            "Other",
+        ],
     )
+
+    background_style = st.selectbox(
+        "Background style",
+        [
+            "Luxury",
+            "Studio",
+            "Cinematic",
+            "Showroom",
+            "Nature",
+            "Café",
+        ],
+    )
+
+    product_descriptions = {
+        "Perfume": (
+            "an elegant scene designed for a premium "
+            "perfume advertisement"
+        ),
+        "Cosmetics": (
+            "a clean beauty-product advertising scene"
+        ),
+        "Jewellery": (
+            "a refined luxury jewellery display scene"
+        ),
+        "Food": (
+            "an inviting commercial food-photography scene"
+        ),
+        "Electronics": (
+            "a modern technology product advertising scene"
+        ),
+        "Other": (
+            "a professional commercial product-photography scene"
+        ),
+    }
+
+    style_descriptions = {
+        "Luxury": (
+            "dark elegant surroundings, warm spotlight, "
+            "premium marble display surface"
+        ),
+        "Studio": (
+            "minimal neutral studio, soft diffused lighting, "
+            "clean matte display surface"
+        ),
+        "Cinematic": (
+            "dramatic cinematic lighting, atmospheric shadows, "
+            "polished display platform"
+        ),
+        "Showroom": (
+            "modern high-end showroom, architectural lighting, "
+            "simple display pedestal"
+        ),
+        "Nature": (
+            "soft natural environment, gentle daylight, "
+            "stone or wooden display surface"
+        ),
+        "Café": (
+            "warm stylish café interior, natural window light, "
+            "clear wooden tabletop"
+        ),
+    }
+
+    background_prompt = (
+        f"Photorealistic {product_descriptions[product_type]}. "
+        f"{style_descriptions[background_style]}. "
+        "Create one broad, clearly visible horizontal surface "
+        "in the foreground for placing the product. "
+        "Keep the central foreground surface completely empty. "
+        "Realistic perspective and professional advertising "
+        "lighting. No product, bottle, jewellery, food, device, "
+        "people, text, logos, watermark, or objects on the "
+        "display surface."
+    )
+
+    with st.expander("View generated prompt"):
+        st.write(background_prompt)
+
+    
 
     if st.button(
         "Generate Background",
