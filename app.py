@@ -2,15 +2,20 @@ import hashlib
 import os
 from io import BytesIO
 import torch
-import numpy as np
 from transformers import (
     Sam2Model,
     Sam2Processor,
-    AutoImageProcessor,
-    AutoModelForDepthEstimation,
 )
 from streamlit_image_coordinates import (
     streamlit_image_coordinates,
+)
+from PIL import (
+    Image,
+    ImageChops,
+    ImageDraw,
+    ImageEnhance,
+    ImageFilter,
+    ImageOps,
 )
 
 import streamlit as st
@@ -23,138 +28,12 @@ from PIL import (
     ImageFilter,
     ImageOps,
 )
-from rembg import remove
 
 
 load_dotenv()
 SAM2_MODEL_NAME = "facebook/sam2.1-hiera-tiny"
 
-DEPTH_MODEL_NAME = "depth-anything/Depth-Anything-V2-Small-hf"
 
-
-@st.cache_data(show_spinner=False)
-def estimate_background_depth(background_bytes):
-    processor, model, device = load_depth_model()
-
-    image = Image.open(
-        BytesIO(background_bytes)
-    ).convert("RGB")
-
-    inputs = processor(
-        images=image,
-        return_tensors="pt",
-    ).to(device)
-
-    with torch.inference_mode():
-        outputs = model(**inputs)
-
-    depth_tensor = torch.nn.functional.interpolate(
-        outputs.predicted_depth.unsqueeze(1),
-        size=(image.height, image.width),
-        mode="bicubic",
-        align_corners=False,
-    )[0, 0]
-
-    depth_array = depth_tensor.cpu().numpy()
-
-    if not np.isfinite(depth_array).all():
-        raise ValueError("The depth prediction contains invalid values.")
-
-    return depth_array
-
-
-
-
-
-@st.cache_resource
-def load_depth_model():
-    device = (
-        "cuda"
-        if torch.cuda.is_available()
-        else "cpu"
-    )
-
-    token = os.getenv("HF_TOKEN")
-
-    processor = AutoImageProcessor.from_pretrained(
-        DEPTH_MODEL_NAME,
-        token=token,
-    )
-
-    model = AutoModelForDepthEstimation.from_pretrained(
-        DEPTH_MODEL_NAME,
-        token=token,
-    )
-
-    model.to(device)
-    model.eval()
-
-    return processor, model, device
-
-
-def suggest_surface_position(depth_array):
-    """Suggest a contact position—not guaranteed table detection."""
-    height, width = depth_array.shape
-
-    central_depth = depth_array[
-        :,
-        int(width * 0.35):int(width * 0.65),
-    ]
-
-    row_depth = np.median(central_depth, axis=1)
-
-    # Reject depth maps with no useful variation.
-    if float(np.ptp(row_depth)) < 1e-8:
-        raise ValueError(
-            "No useful depth variation was found. "
-            "Please position the product manually."
-        )
-
-    window_size = 15
-    padding = window_size // 2
-
-    smoothed_depth = np.convolve(
-        np.pad(
-            row_depth,
-            (padding, padding),
-            mode="edge",
-        ),
-        np.ones(window_size) / window_size,
-        mode="valid",
-    )
-
-    depth_change = np.gradient(smoothed_depth)
-
-    # Prefer a large foreground support surface.
-    search_start = int(height * 0.55)
-    search_end = int(height * 0.90)
-
-    candidate_changes = depth_change[
-        search_start:search_end
-    ]
-
-    if float(candidate_changes.max()) <= 0:
-        raise ValueError(
-            "No suitable depth boundary was found. "
-            "Please position the product manually."
-        )
-
-    boundary_y = search_start + int(
-        np.argmax(candidate_changes)
-    )
-
-    suggested_y = min(
-        height - 1,
-        boundary_y + int(height * 0.10),
-    )
-
-    return int(
-        np.clip(
-            round(suggested_y / height * 100),
-            20,
-            100,
-        )
-    )
 
 @st.cache_resource
 def load_sam2_model():
@@ -183,7 +62,7 @@ def load_sam2_model():
 @st.cache_data(show_spinner=False)
 def remove_background_with_sam2(
     image_bytes,
-    selected_point,
+    selected_points,
 ):
     processor, model, device = load_sam2_model()
 
@@ -191,33 +70,25 @@ def remove_background_with_sam2(
         BytesIO(image_bytes)
     ).convert("RGB")
 
-    point_list = [
-        [int(x), int(y)]
-        for x, y in selected_point
+    # Treat every click as a separate prompt.
+    point_prompts = [
+        [[int(x), int(y)]]
+        for x, y in selected_points
     ]
 
-    input_points = [
-        [
-            point_list,
-        ]
+    label_prompts = [
+        [1]
+        for _ in selected_points
     ]
-
-    input_labels = [
-        [
-            [1] * len(point_list),
-        ]
-    ]
-
-
 
     inputs = processor(
         images=image,
-        input_points=input_points,
-        input_labels=input_labels,
+        input_points=[point_prompts],
+        input_labels=[label_prompts],
         return_tensors="pt",
     ).to(device)
 
-    with torch.no_grad():
+    with torch.inference_mode():
         outputs = model(
             **inputs,
             multimask_output=True,
@@ -228,22 +99,34 @@ def remove_background_with_sam2(
         inputs["original_sizes"].cpu(),
     )[0]
 
-    quality_scores = outputs.iou_scores[
-        0,
-        0,
-    ].cpu()
+    quality_scores = outputs.iou_scores[0].cpu()
 
-    best_mask_index = int(
-        torch.argmax(quality_scores)
+    combined_mask = torch.zeros_like(
+        processed_masks[0, 0],
+        dtype=torch.bool,
     )
 
-    best_mask = processed_masks[
-        0,
-        best_mask_index,
-    ]
+    # Select the best mask for each click, then combine them.
+    for point_index in range(
+        len(selected_points)
+    ):
+        best_mask_index = int(
+            torch.argmax(
+                quality_scores[point_index]
+            )
+        )
+
+        point_mask = processed_masks[
+            point_index,
+            best_mask_index,
+        ] > 0
+
+        combined_mask = (
+            combined_mask | point_mask
+        )
 
     mask_array = (
-        (best_mask > 0)
+        combined_mask
         .to(torch.uint8)
         .numpy()
         * 255
@@ -257,7 +140,22 @@ def remove_background_with_sam2(
         ImageFilter.MedianFilter(size=5)
     )
 
-    # Slightly soften the mask edges
+    # Fill enclosed transparent holes, such as the
+    # inside of a bowl or transparent bottle.
+    inverted_mask = ImageOps.invert(mask_image)
+    enclosed_holes = inverted_mask.copy()
+
+    ImageDraw.floodfill(
+        enclosed_holes,
+        xy=(0, 0),
+        value=0,
+    )
+
+    mask_image = ImageChops.lighter(
+        mask_image,
+        enclosed_holes,
+    )
+
     mask_image = mask_image.filter(
         ImageFilter.GaussianBlur(radius=1)
     )
@@ -266,13 +164,6 @@ def remove_background_with_sam2(
     transparent_product.putalpha(mask_image)
 
     return transparent_product
-
-@st.cache_data(show_spinner=False)
-def remove_image_background(image_bytes):
-    """Remove the background and cache the result."""
-    image = Image.open(BytesIO(image_bytes)).convert("RGBA")
-    return remove(image)
-
 
 def image_to_bytes(image):
     """Convert a Pillow image into downloadable PNG bytes."""
@@ -486,125 +377,148 @@ if (
     st.session_state.pop("sam_points", None)
     st.session_state.pop("last_sam_click", None)
 
-selection_method = st.radio(
-    "Product selection method",
-    options=[
-        "Automatic",
-        "Click Product — SAM 2",
-    ],
-    horizontal=True,
+st.subheader("Select the Product")
+
+st.info(
+    "Click at least 2 areas inside the product. "
+    "Add more points if any part is missing."
 )
 
-if selection_method == "Click Product — SAM 2":
-    st.subheader("Select the Product")
+if "sam_points" not in st.session_state:
+    st.session_state.sam_points = []
 
-    st.write(
-        "Click different parts of the product. "
-        "For this perfume, click the bottle and the cap."
+if "sam_click_version" not in st.session_state:
+    st.session_state.sam_click_version = 0
+
+if st.button("Clear Selection Points"):
+    st.session_state.sam_points = []
+    st.session_state.sam_click_version += 1
+    st.session_state.pop(
+        "last_sam_click",
+        None,
+    )
+    st.rerun()
+
+selection_image = product_image.convert("RGB").copy()
+
+selection_image.thumbnail(
+    (700, 700),
+    Image.Resampling.LANCZOS,
+)
+
+# Draw every selected point on the displayed image.
+point_draw = ImageDraw.Draw(selection_image)
+
+point_radius = max(
+    7,
+    min(selection_image.size) // 70,
+)
+
+for point_number, (original_x, original_y) in enumerate(
+    st.session_state.sam_points,
+    start=1,
+):
+    display_x = int(
+        original_x
+        * selection_image.width
+        / product_image.width
     )
 
-    if "sam_points" not in st.session_state:
-        st.session_state.sam_points = []
-
-    if "sam_click_version" not in st.session_state:
-        st.session_state.sam_click_version = 0
-
-    if st.button("Clear Selection Points"):
-        st.session_state.sam_points = []
-        st.session_state.sam_click_version += 1
-        st.session_state.pop(
-            "last_sam_click",
-            None,
-        )
-        st.rerun()
-
-    selection_image = product_image.convert("RGB").copy()
-
-    selection_image.thumbnail(
-        (700, 700),
-        Image.Resampling.LANCZOS,
+    display_y = int(
+        original_y
+        * selection_image.height
+        / product_image.height
     )
 
-    click_result = streamlit_image_coordinates(
-        selection_image,
-        key=(
-            f"sam_click_{file_signature}_"
-            f"{st.session_state.sam_click_version}"
+    point_draw.ellipse(
+        (
+            display_x - point_radius,
+            display_y - point_radius,
+            display_x + point_radius,
+            display_y + point_radius,
+        ),
+        fill="#FF3B30",
+        outline="white",
+        width=3,
+    )
+
+    point_draw.text(
+        (
+            display_x - 4,
+            display_y - 7,
+        ),
+        str(point_number),
+        fill="white",
+    )
+
+click_result = streamlit_image_coordinates(
+    selection_image,
+    key=(
+        f"sam_click_{file_signature}_"
+        f"{st.session_state.sam_click_version}"
+    ),
+)
+
+if click_result is not None:
+    click_signature = click_result.get(
+        "unix_time",
+        (
+            click_result["x"],
+            click_result["y"],
         ),
     )
 
-    if click_result is not None:
-        click_signature = click_result.get(
-            "unix_time",
-            (
-                click_result["x"],
-                click_result["y"],
-            ),
-        )
-
-        if (
-            st.session_state.get("last_sam_click")
-            != click_signature
-        ):
-            original_x = int(
-                click_result["x"]
-                * product_image.width
-                / selection_image.width
-            )
-
-            original_y = int(
-                click_result["y"]
-                * product_image.height
-                / selection_image.height
-            )
-
-            st.session_state.sam_points.append(
-                (original_x, original_y)
-            )
-
-            st.session_state.last_sam_click = (
-                click_signature
-            )
-
-    if st.session_state.sam_points:
-        st.success(
-            f"{len(st.session_state.sam_points)} "
-            "selection point(s) added."
-        )
-
-        st.write(
-            "Selected coordinates:",
-            st.session_state.sam_points,
-        )
-
-    else:
-        st.info(
-            "Click at least one part of the product."
-        )
-        st.stop()
-
-
-if selection_method == "Click Product — SAM 2":
-    with st.spinner(
-        "SAM 2 is selecting your product..."
+    if (
+        st.session_state.get("last_sam_click")
+        != click_signature
     ):
-        transparent_image = (
-            remove_background_with_sam2(
-                uploaded_bytes,
-                tuple(st.session_state.sam_points),
-            )
+        original_x = int(
+            click_result["x"]
+            * product_image.width
+            / selection_image.width
         )
 
-else:
-    with st.spinner(
-        "Removing the background automatically..."
-    ):
-        transparent_image = (
-            remove_image_background(
-                uploaded_bytes
-            )
+        original_y = int(
+            click_result["y"]
+            * product_image.height
+            / selection_image.height
         )
 
+        st.session_state.sam_points.append(
+            (original_x, original_y)
+        )
+
+        st.session_state.last_sam_click = (
+            click_signature
+        )
+
+        # Refresh so the new numbered dot appears immediately.
+        st.rerun()
+
+number_of_points = len(
+    st.session_state.sam_points
+)
+
+if number_of_points < 2:
+    st.warning(
+        f"{number_of_points}/2 points selected. "
+        "Please click another area of the product."
+    )
+    st.stop()
+
+st.success(
+    f"{number_of_points} selection points added."
+)
+
+with st.spinner(
+    "SAM 2 is selecting your product..."
+):
+    transparent_image = (
+        remove_background_with_sam2(
+            uploaded_bytes,
+            tuple(st.session_state.sam_points),
+        )
+    )
 
 with st.expander("View image preparation", expanded=False):
     original_column, removed_column = st.columns(2)
@@ -683,80 +597,153 @@ with ai_tab:
             "Other",
         ],
     )
-
-    background_style = st.selectbox(
-        "Background style",
-        [
-            "Luxury",
-            "Studio",
-            "Cinematic",
-            "Showroom",
-            "Nature",
-            "Café",
+    product_view = st.radio(
+        "Product view",
+        options=[
+            "Upright",
+            "Top-down",
         ],
+        index=(
+            1
+            if product_type == "Food"
+            else 0
+        ),
+        horizontal=True,
     )
+    background_style = st.selectbox(
+    "Background style",
+    [
+        "Luxury",
+        "Studio",
+        "Cinematic",
+        "Showroom",
+        "Nature",
+        "Café",
+    ],
+)
 
     product_descriptions = {
-        "Perfume": (
-            "an elegant scene designed for a premium "
-            "perfume advertisement"
-        ),
-        "Cosmetics": (
-            "a clean beauty-product advertising scene"
-        ),
-        "Jewellery": (
-            "a refined luxury jewellery display scene"
-        ),
-        "Food": (
-            "an inviting commercial food-photography scene"
-        ),
-        "Electronics": (
-            "a modern technology product advertising scene"
-        ),
-        "Other": (
-            "a professional commercial product-photography scene"
-        ),
+        "Perfume": "elegant amber and cream lighting",
+        "Cosmetics": "soft pastel colours and diffused lighting",
+        "Jewellery": "deep velvet tones and precise luxury lighting",
+        "Food": "warm appetising colours and natural lighting",
+        "Electronics": "cool modern colours and crisp lighting",
+        "Other": "balanced neutral colours and professional lighting",
     }
 
-    style_descriptions = {
+    upright_styles = {
         "Luxury": (
-            "dark elegant surroundings, warm spotlight, "
-            "premium marble display surface"
+            "an elegant luxury room with a broad marble surface "
+            "in the foreground"
         ),
         "Studio": (
-            "minimal neutral studio, soft diffused lighting, "
-            "clean matte display surface"
+            "a minimal photography studio with a matte display surface"
         ),
         "Cinematic": (
-            "dramatic cinematic lighting, atmospheric shadows, "
-            "polished display platform"
+            "a dramatic cinematic room with a dark display surface"
         ),
         "Showroom": (
-            "modern high-end showroom, architectural lighting, "
-            "simple display pedestal"
+            "a modern high-end showroom with a clean display counter"
         ),
         "Nature": (
-            "soft natural environment, gentle daylight, "
-            "stone or wooden display surface"
+            "a soft natural setting with a stone or wooden surface"
         ),
         "Café": (
-            "warm stylish café interior, natural window light, "
-            "clear wooden tabletop"
+            "a warm stylish café interior with a clear wooden table "
+            "in the foreground"
         ),
     }
 
-    background_prompt = (
-        f"Photorealistic {product_descriptions[product_type]}. "
-        f"{style_descriptions[background_style]}. "
-        "Create one broad, clearly visible horizontal surface "
-        "in the foreground for placing the product. "
-        "Keep the central foreground surface completely empty. "
-        "Realistic perspective and professional advertising "
-        "lighting. No product, bottle, jewellery, food, device, "
-        "people, text, logos, watermark, or objects on the "
-        "display surface."
-    )
+    top_down_styles = {
+        "Luxury": (
+            "one continuous polished marble surface with subtle "
+            "gold-toned lighting around the edges"
+        ),
+        "Studio": (
+            "one continuous neutral matte studio surface with soft "
+            "diffused lighting"
+        ),
+        "Cinematic": (
+            "one continuous dark textured surface with dramatic "
+            "diagonal light and soft shadows"
+        ),
+        "Showroom": (
+            "one continuous polished minimal surface with clean "
+            "architectural lighting"
+        ),
+        "Nature": (
+            "one continuous natural stone or wooden surface with "
+            "subtle leaves around the outer edges"
+        ),
+        "Café": (
+            "one continuous warm wooden café tabletop with natural "
+            "wood grain and soft window light"
+        ),
+    }
 
+    if product_view == "Top-down":
+        selected_style = top_down_styles[background_style]
+
+        composition_description = (
+            "Strict overhead flat-lay photography. "
+            "The camera is directly above the surface at exactly "
+            "90 degrees, pointing straight down. "
+            "The entire image is a single flat horizontal surface. "
+            "No room, wall, horizon, furniture, chairs, windows, "
+            "shelves, podium, pedestal, plate, bowl, food, bottle, "
+            "product, or vertical objects."
+        )
+
+    else:
+        selected_style = upright_styles[background_style]
+
+        composition_description = (
+            "Front-facing commercial product photography. "
+            "Show a broad horizontal surface in the foreground "
+            "with realistic perspective."
+        )
+
+    if product_view == "Top-down":
+        background_prompt = (
+            "EMPTY WOODEN TABLETOP TEXTURE. "
+            "Strict 90-degree overhead photograph with the camera "
+            "pointing directly downward. "
+            f"{selected_style}. "
+            "The entire image must contain only one continuous flat "
+            "surface with an empty centre. "
+            "No food, bowl, plate, cup, product, cutting board, props, "
+            "chairs, windows, walls, room, horizon, furniture, text, "
+            "logo, or watermark."
+        )
+
+    else:
+        background_prompt = (
+            "Create an empty photorealistic commercial background "
+            "plate only. "
+            f"Use {product_descriptions[product_type]}. "
+            f"Scene: {selected_style}. "
+            f"{composition_description} "
+            "Keep the centre completely empty for adding a product later. "
+            "Do not generate the product itself. "
+            "No text, logo, watermark, people, or extra display platform."
+        )
+
+    
+
+
+    
+
+    
+
+    
+       
+     
+        
+    
+
+    
+
+    
     with st.expander("View generated prompt"):
         st.write(background_prompt)
 
@@ -837,8 +824,13 @@ with ai_tab:
             ),
         }
 
-        with st.sidebar:
-            st.header("Photo Controls")
+        st.subheader("Final Product Photo")
+        final_photo_placeholder = st.empty()
+
+        with st.expander(
+            "🎛️ Adjust Product",
+            expanded=True,
+        ):
 
             selected_format = st.selectbox(
                 "Output format",
@@ -852,43 +844,8 @@ with ai_tab:
                 value=25,
             )
 
-            if st.button("Suggest Surface Placement"):
-                try:
-                    with st.spinner("Estimating surface position..."):
-                        detection_background = ImageOps.fit(
-                            generated_background.convert("RGB"),
-                            output_formats[selected_format],
-                            method=Image.Resampling.LANCZOS,
-                        )
-
-                        depth_array = estimate_background_depth(
-                            image_to_bytes(detection_background)
-                        )
-
-                        suggested_position = suggest_surface_position(
-                            depth_array
-                        )
-
-                    # Set these before creating their sliders.
-                    st.session_state.horizontal_position = 50
-                    st.session_state.vertical_position = (
-                        suggested_position
-                    )
-
-                    st.success(
-                        f"Suggested product bottom: "
-                        f"{suggested_position}%"
-                    )
-
-                except Exception as error:
-                    st.warning(
-                        f"Placement suggestion failed: {error}"
-                    )
-
-            st.caption(
-                "Depth-based suggestion, not guaranteed table "
-                "detection. Adjust manually if needed."
-            )
+           
+             
 
             horizontal_position = st.slider(
                 "Horizontal position",
@@ -948,9 +905,7 @@ with ai_tab:
             )
         )
 
-        st.subheader("Final Product Photo")
-
-        st.image(
+        final_photo_placeholder.image(
             final_product_image,
             width="stretch",
         )
