@@ -1,3 +1,5 @@
+import base64
+import requests
 import hashlib
 import os
 from io import BytesIO
@@ -20,7 +22,6 @@ from PIL import (
 
 import streamlit as st
 from dotenv import load_dotenv
-from huggingface_hub import InferenceClient
 from PIL import (
     Image,
     ImageDraw,
@@ -71,20 +72,18 @@ def remove_background_with_sam2(
     ).convert("RGB")
 
     # Treat every click as a separate prompt.
-    point_prompts = [
-        [[int(x), int(y)]]
+    # Treat all clicks as positive points for one product.
+    product_points = [
+        [int(x), int(y)]
         for x, y in selected_points
-    ]
-
-    label_prompts = [
-        [1]
-        for _ in selected_points
     ]
 
     inputs = processor(
         images=image,
-        input_points=[point_prompts],
-        input_labels=[label_prompts],
+        input_points=[[product_points]],
+        input_labels=[[
+            [1] * len(product_points)
+        ]],
         return_tensors="pt",
     ).to(device)
 
@@ -99,38 +98,27 @@ def remove_background_with_sam2(
         inputs["original_sizes"].cpu(),
     )[0]
 
-    quality_scores = outputs.iou_scores[0].cpu()
+    quality_scores = outputs.iou_scores[
+        0,
+        0,
+    ].cpu()
 
-    combined_mask = torch.zeros_like(
-        processed_masks[0, 0],
-        dtype=torch.bool,
+    best_mask_index = int(
+        torch.argmax(quality_scores)
     )
 
-    # Select the best mask for each click, then combine them.
-    for point_index in range(
-        len(selected_points)
-    ):
-        best_mask_index = int(
-            torch.argmax(
-                quality_scores[point_index]
-            )
-        )
-
-        point_mask = processed_masks[
-            point_index,
-            best_mask_index,
-        ] > 0
-
-        combined_mask = (
-            combined_mask | point_mask
-        )
+    best_mask = processed_masks[
+        0,
+        best_mask_index,
+    ] > 0
 
     mask_array = (
-        combined_mask
+        best_mask
         .to(torch.uint8)
         .numpy()
         * 255
     )
+        
 
     mask_image = Image.fromarray(
         mask_array
@@ -373,6 +361,10 @@ if (
         "generated_background",
         None,
     )
+    st.session_state.pop(
+    "background_history",
+    None,
+)
 
     st.session_state.pop("sam_points", None)
     st.session_state.pop("last_sam_click", None)
@@ -527,14 +519,14 @@ with st.expander("View image preparation", expanded=False):
         st.subheader("Original")
         st.image(
             product_image,
-            width="stretch",
+            width=700,
         )
 
     with removed_column:
         st.subheader("Background Removed")
         st.image(
             transparent_image,
-            width="stretch",
+            width=700,
         )
 
 
@@ -572,7 +564,7 @@ with solid_tab:
 
     st.image(
         colour_preview,
-        width="stretch",
+        width=700,
     )
 
     st.download_button(
@@ -747,63 +739,147 @@ with ai_tab:
     with st.expander("View generated prompt"):
         st.write(background_prompt)
 
-    
-
     if st.button(
         "Generate Background",
         type="primary",
     ):
-        if not background_prompt.strip():
-            st.warning(
-                "Please describe the background first."
+        cloudflare_token = os.getenv(
+            "CLOUDFLARE_API_TOKEN"
+        )
+        cloudflare_account_id = os.getenv(
+            "CLOUDFLARE_ACCOUNT_ID"
+        )
+
+        if not cloudflare_token or not cloudflare_account_id:
+            st.error(
+                "Cloudflare credentials were not found."
             )
 
         else:
-            hf_token = os.getenv("HF_TOKEN")
-
-            if not hf_token:
-                st.error(
-                    "Hugging Face token was not found."
+            try:
+                api_url = (
+                    "https://api.cloudflare.com/client/v4/"
+                    f"accounts/{cloudflare_account_id}/ai/run/"
+                    "@cf/black-forest-labs/flux-1-schnell"
                 )
 
-            else:
-                try:
-                    client = InferenceClient(
-                        provider="auto",
-                        api_key=hf_token,
+                headers = {
+                    "Authorization": (
+                        f"Bearer {cloudflare_token}"
+                    ),
+                    "Content-Type": "application/json",
+                }
+
+                request_data = {
+                    "prompt": background_prompt,
+                    "steps": 4,
+                }
+
+                with st.spinner(
+                    "Generating your background..."
+                ):
+                    response = requests.post(
+                        api_url,
+                        headers=headers,
+                        json=request_data,
+                        timeout=120,
                     )
 
-                    with st.spinner(
-                        "Generating your background..."
-                    ):
-                        generated_background = (
-                            client.text_to_image(
-                                background_prompt,
-                                model=(
-                                    "black-forest-labs/"
-                                    "FLUX.1-schnell"
-                                ),
-                            )
+                    response.raise_for_status()
+                    response_data = response.json()
+
+                    image_base64 = response_data.get(
+                        "result",
+                        {},
+                    ).get("image")
+
+                    if not image_base64:
+                        raise RuntimeError(
+                            "Cloudflare returned no image."
                         )
 
-                    st.session_state.generated_background = (
-                        generated_background
-                    )
+                    generated_background = Image.open(
+                        BytesIO(
+                            base64.b64decode(image_base64)
+                        )
+                    ).convert("RGBA")
 
-                except Exception as error:
-                    st.error(
-                        "Background generation failed: "
-                        f"{error}"
-                    )
+                if "background_history" not in st.session_state:
+                    st.session_state.background_history = []
+
+                st.session_state.background_history.append(
+                    generated_background
+                )
+
+                st.session_state.background_history = (
+                    st.session_state.background_history[-3:]
+                )
+
+                st.session_state.generated_background = (
+                    generated_background
+                )
+
+            except Exception as error:
+                st.error(
+                    "Background generation failed: "
+                    f"{error}"
+                )
+
+    
+
+    
+       
+           
+                      
+                   
+
+          
+    background_history = st.session_state.get(
+        "background_history",
+        [],
+    )
 
     if "generated_background" in st.session_state:
+     
         if st.button("Clear AI Background"):
-            del st.session_state.generated_background
+            st.session_state.pop(
+                "generated_background",
+                None,
+            )
+            st.session_state.pop(
+                "background_history",
+                None,
+            )
             st.rerun()
     if "generated_background" in st.session_state:
         generated_background = (
             st.session_state.generated_background
         )
+
+    if background_history:
+        st.subheader("Choose a Generated Background")
+
+        history_columns = st.columns(
+            len(background_history)
+        )
+
+        for index, history_background in enumerate(
+            background_history
+        ):
+            with history_columns[index]:
+                st.image(
+                    history_background,
+                    width="stretch",
+                )
+
+                if st.button(
+                    f"Use Background {index + 1}",
+                    key=f"use_background_{index}",
+                ):
+                    st.session_state.generated_background = (
+                        history_background
+                    )
+                    st.rerun()
 
         output_formats = {
             "Square — Instagram (1080 × 1080)": (
@@ -825,7 +901,7 @@ with ai_tab:
         }
 
         st.subheader("Final Product Photo")
-        final_photo_placeholder = st.empty()
+        comparison_placeholder = st.empty()
 
         with st.expander(
             "🎛️ Adjust Product",
@@ -905,10 +981,24 @@ with ai_tab:
             )
         )
 
-        final_photo_placeholder.image(
-            final_product_image,
-            width="stretch",
-        )
+        with comparison_placeholder.container():
+            before_column, after_column = st.columns(2)
+
+            with before_column:
+                st.markdown("### Before")
+                st.image(
+                    product_image,
+                    width="stretch",
+                )
+
+            with after_column:
+                st.markdown("### After")
+                st.image(
+                    final_product_image,
+                    width="stretch",
+                )
+
+        
 
         st.caption(
             f"Output size: {output_size[0]} × "
@@ -927,5 +1017,5 @@ with ai_tab:
         ):
             st.image(
                 generated_background,
-                width="stretch",
+                width=700,
             )
