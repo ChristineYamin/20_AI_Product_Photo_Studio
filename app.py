@@ -22,13 +22,6 @@ from PIL import (
 
 import streamlit as st
 from dotenv import load_dotenv
-from PIL import (
-    Image,
-    ImageDraw,
-    ImageEnhance,
-    ImageFilter,
-    ImageOps,
-)
 
 
 load_dotenv()
@@ -70,8 +63,7 @@ def remove_background_with_sam2(
     image = Image.open(
         BytesIO(image_bytes)
     ).convert("RGB")
-
-    # Treat every click as a separate prompt.
+    
     # Treat all clicks as positive points for one product.
     product_points = [
         [int(x), int(y)]
