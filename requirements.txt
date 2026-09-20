@@ -1,10 +1,7 @@
 streamlit>=1.53
-streamlit-drawable-canvas>=0.13.0
 Pillow
-huggingface-hub
 python-dotenv
 torch
-torchvision
 transformers
 streamlit-image-coordinates
 requests

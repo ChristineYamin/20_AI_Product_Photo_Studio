@@ -170,6 +170,10 @@ def place_product_on_background(
     vertical_ratio,
     brightness,
     contrast,
+    saturation,
+    sharpness,
+    shadow_strength,
+    shadow_blur,
 ):
     """Crop, resize, adjust and position a product on a background."""
     alpha_channel = product_image.getchannel("A")
@@ -215,6 +219,16 @@ def place_product_on_background(
     product_rgb = ImageEnhance.Contrast(
         product_rgb
     ).enhance(contrast)
+
+    product_rgb = ImageEnhance.Color(
+    product_rgb
+    ).enhance(saturation)
+
+    product_rgb = ImageEnhance.Sharpness(
+    product_rgb
+    ).enhance(sharpness)
+
+
 
     resized_product = product_rgb.convert("RGBA")
     resized_product.putalpha(product_alpha)
@@ -277,16 +291,15 @@ def place_product_on_background(
             shadow_left + shadow_width,
             shadow_top + shadow_height,
         ),
-        fill=(0, 0, 0, 110),
+        fill=(0, 0, 0, shadow_strength),
     )
 
-    shadow_blur = max(
-        6,
-        int(target_width * 0.04),
+    shadow_blur_radius = max(
+        1,
+        int(target_width * shadow_blur / 1000),
     )
-
     shadow_layer = shadow_layer.filter(
-        ImageFilter.GaussianBlur(shadow_blur)
+        ImageFilter.GaussianBlur(shadow_blur_radius)
     )
 
     # Create product layer
@@ -317,6 +330,137 @@ st.set_page_config(
     page_icon="📸",
     layout="wide",
 )
+st.markdown(
+    """
+    <style>
+    @import url(
+    'https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&display=swap'
+);
+
+
+    /* Main page width and spacing */
+    .block-container {
+        max-width: 1200px;
+        padding-top: 2rem;
+        padding-bottom: 4rem;
+    }
+
+    /* Page title */
+   h1 {
+    font-family: "Fredoka", "Trebuchet MS", sans-serif !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.5px;
+    background: linear-gradient(
+        90deg,
+        #E85D75,
+        #8A78C9,
+        #5A9CCB
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+    /* Section headings */
+    h2, h3 {
+        color: #30313D;
+    }
+
+    /* Buttons */
+    .stButton > button,
+    .stDownloadButton > button {
+        border-radius: 10px;
+        border: 1px solid #E85D55;
+        font-weight: 600;
+        transition: all 0.2s ease;
+    }
+
+    .stButton > button:hover,
+    .stDownloadButton > button:hover {
+        color: white;
+        background-color: #E85D55;
+        border-color: #E85D55;
+        transform: translateY(-1px);
+    }
+
+    /* Primary buttons */
+    button[kind="primary"] {
+        background-color: #E85D55;
+        border-color: #E85D55;
+    }
+
+    /* Image styling */
+    [data-testid="stImage"] img {
+        border-radius: 14px;
+    }
+
+    /* Expanders */
+    [data-testid="stExpander"] {
+        border: 1px solid #E8E8EC;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    /* Tabs */
+    button[data-baseweb="tab"] {
+        font-weight: 600;
+    }
+
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #E85D55;
+    }
+
+    /* Sliders */
+    [data-testid="stSlider"] {
+        padding-top: 0.25rem;
+        padding-bottom: 0.25rem;
+    }
+
+    /* File uploader */
+    [data-testid="stFileUploaderDropzone"] {
+        border-radius: 14px;
+        border: 2px dashed #E8A09A;
+        background-color: #FFF9F8;
+    }
+
+    /* Success and information messages */
+    [data-testid="stAlert"] {
+        border-radius: 10px;
+    }
+
+    /* App background */
+[data-testid="stAppViewContainer"] {
+    background: linear-gradient(
+        135deg,
+        #F7FBFF 0%,
+        #EDF6FC 100%
+    );
+}
+
+[data-testid="stHeader"] {
+    background-color: rgba(247, 251, 255, 0.85);
+}
+
+
+    /* Smaller screens */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+
+
 
 st.title("📸 AI Product Photo Studio")
 st.write(
@@ -587,7 +731,10 @@ with ai_tab:
             "Cosmetics",
             "Jewellery",
             "Food",
+            "Beverages",
             "Electronics",
+            "Toys",
+            "Fashion Accessories",
             "Other",
         ],
     )
@@ -613,6 +760,11 @@ with ai_tab:
         "Showroom",
         "Nature",
         "Café",
+        "Minimal"
+        "Playful",
+        "Rustic",
+        "Futuristic",
+
     ],
 )
 
@@ -621,7 +773,12 @@ with ai_tab:
         "Cosmetics": "soft pastel colours and diffused lighting",
         "Jewellery": "deep velvet tones and precise luxury lighting",
         "Food": "warm appetising colours and natural lighting",
+        "Beverages": "refreshing colours with bright commercial lighting",
         "Electronics": "cool modern colours and crisp lighting",
+        "Toys": "cheerful pastel colours with soft playful lighting",
+        "Fashion Accessories": (
+        "stylish neutral colours with polished editorial lighting"
+        ),
         "Other": "balanced neutral colours and professional lighting",
     }
 
@@ -645,6 +802,19 @@ with ai_tab:
         "Café": (
             "a warm stylish café interior with a clear wooden table "
             "in the foreground"
+        ),
+        "Minimal": (
+            "a clean minimal studio with a smooth neutral display surface"
+        ),
+        "Playful": (
+            "a cheerful pastel studio with a soft colourful display surface"
+        ),
+        "Rustic": (
+            "a warm rustic setting with a natural wooden table"
+        ),
+        "Futuristic": (
+            "a sleek futuristic studio with subtle neon lighting "
+            "and a clean reflective surface"
         ),
     }
 
@@ -673,6 +843,21 @@ with ai_tab:
             "one continuous warm wooden café tabletop with natural "
             "wood grain and soft window light"
         ),
+        "Minimal": (
+            "one continuous clean neutral surface with soft even lighting"
+        ),
+        "Playful": (
+            "one continuous pastel-coloured surface with cheerful "
+            "soft lighting"
+        ),
+        "Rustic": (
+            "one continuous rustic wooden surface with warm natural lighting"
+        ),
+        "Futuristic": (
+            "one continuous sleek metallic surface with subtle neon "
+            "edge lighting"
+        ),
+
     }
 
     if product_view == "Top-down":
@@ -963,6 +1148,44 @@ with ai_tab:
                 value=100,
             )
 
+            shadow_strength = st.slider(
+                "Shadow strength",
+                min_value=0,
+                max_value=200,
+                value=110,
+                help="Control how dark the product shadow appears.",
+            )
+
+            shadow_blur = st.slider(
+                "Shadow softness",
+                min_value=5,
+                max_value=100,
+                value=40,
+                help="Increase it for a softer, more diffused shadow.",
+            )
+
+            saturation = st.slider(
+                "Product saturation",
+                min_value=0,
+                max_value=200,
+                value=100,
+                help="Control the intensity of the product colours.",
+            )
+
+            sharpness = st.slider(
+                "Product sharpness",
+                min_value=0,
+                max_value=200,
+                value=100,
+                help="Control the clarity of product details.",
+            )
+
+
+
+
+
+
+
         output_size = output_formats[
             selected_format
         ]
@@ -986,6 +1209,10 @@ with ai_tab:
                 ),
                 brightness=brightness / 100,
                 contrast=contrast / 100,
+                saturation=saturation / 100,
+                sharpness=sharpness / 100,
+                shadow_strength=shadow_strength,
+                shadow_blur=shadow_blur,
             )
         )
 
