@@ -2,6 +2,7 @@ streamlit>=1.53
 Pillow
 python-dotenv
 torch
+torchvision
 transformers
 streamlit-image-coordinates
 requests

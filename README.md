@@ -1,146 +1,214 @@
-# 📸 Project 20: AI Product Photo Studio
+📸 AI Product Photo Studio
 
-An AI-powered product photography application that transforms ordinary product photos into polished promotional images.
+AI Product Photo Studio is a Streamlit application that transforms ordinary product photos into polished promotional images. Users select a product with guided clicks, remove its original background using SAM 2, generate a new AI background, and fine-tune the final composition through interactive photo controls.
 
-The application removes the original background, generates a new scene from a text prompt, and intelligently places the real product into the generated environment.
+🔗 Live app: project20-photo-studio.streamlit.app
 
-## 🎯 Project Goal
+Overview
 
-Professional product photography can require suitable backgrounds, lighting, editing skills, and expensive equipment.
+Creating clean product photography normally requires a studio, careful lighting, and manual editing. This project provides a simpler workflow inside one web application:
 
-This project explores how computer vision, generative AI, and image processing can simplify that workflow while preserving the appearance of the original product.
+Upload a product image.
 
-## ✨ Features
+Click at least two areas inside the product.
 
-- Upload JPG, JPEG, or PNG product images
-- Automatically remove image backgrounds
-- Apply a custom solid-colour background
-- Generate realistic backgrounds from text prompts
-- Automatically detect and crop the product
-- Adjust product size and position
-- Adjust product brightness and contrast
-- Generate a soft contact shadow
-- Export images for different platforms
-- Download the finished image as a PNG
+Let SAM 2 isolate the selected object.
 
-## 🧠 AI and Computer Vision Pipeline
+Choose the product type, camera view, and background style.
 
-1. The user uploads a product photograph.
-2. `rembg` separates the foreground product from its background.
-3. The alpha mask is used to identify the product's bounding box.
-4. FLUX.1-schnell generates a new background from the user's prompt.
-5. The generated background is resized to the selected output format.
-6. The product is cropped, resized, repositioned, and visually adjusted.
-7. A blurred contact shadow is generated beneath the product.
-8. The foreground and background layers are composited into the final image.
+Generate an empty AI background with Cloudflare Workers AI.
 
-## 🛠️ Technologies
+Adjust the product and download the completed promotional image.
 
-- Python
-- Streamlit
-- Pillow
-- rembg
-- U²-Net
-- Hugging Face Inference Providers
-- FLUX.1-schnell
-- python-dotenv
+Features
 
-## 📐 Output Formats
+Guided product selection with visible, numbered click points
 
-- Square Instagram post: 1080 × 1080
-- Portrait Instagram post: 1080 × 1350
-- Instagram Story or TikTok: 1080 × 1920
-- Website landscape image: 1200 × 800
+SAM 2 segmentation for interactive background removal
 
-## 📁 Project Structure
+AI background generation through Cloudflare Workers AI and FLUX.1 Schnell
 
-```text
-20_AI_Product_Photo_Studio/
-├── app.py
-├── requirements.txt
-├── README.md
-├── .gitignore
-└── .env
-```
+Upright and top-down compositions for products and food photography
 
-The `.env` file is excluded from GitHub because it contains the Hugging Face access token.
+Product-aware background prompts for perfume, cosmetics, jewellery, food, beverages, electronics, toys, fashion accessories, and other products
 
-## ⚙️ Installation
+Multiple visual styles, including Luxury, Studio, Cinematic, Showroom, Nature, Café, Playful, Rustic, and Futuristic
 
-### 1. Clone the repository
+Generated background history with up to three recent alternatives
 
-```bash
-git clone YOUR_REPOSITORY_URL
+Solid-colour background option
+
+Interactive photo controls for size, position, brightness, contrast, saturation, sharpness, shadow strength, and shadow softness
+
+Multiple export formats for Instagram, TikTok, stories, and websites
+
+Before-and-final comparison with equally sized previews
+
+PNG download of the finished product image
+
+Responsive Streamlit interface with a custom playful visual theme
+
+Technology Stack
+
+Component
+
+Technology
+
+User interface
+
+Streamlit
+
+Product segmentation
+
+Meta SAM 2 via Hugging Face Transformers
+
+Background generation
+
+Cloudflare Workers AI — FLUX.1 Schnell
+
+Image processing
+
+Pillow
+
+Deep-learning runtime
+
+PyTorch
+
+Interactive selection
+
+streamlit-image-coordinates
+
+HTTP communication
+
+Requests
+
+Application Workflow
+
+flowchart TD
+    A[Upload product photo] --> B[Click inside the product]
+    B --> C[SAM 2 creates product mask]
+    C --> D[Choose product type and style]
+    D --> E[Generate AI background]
+    E --> F[Position and enhance product]
+    F --> G[Compare and download result]
+
+Installation
+
+1. Clone the repository
+
+git clone https://github.com/ChristineYamin/20_AI_Product_Photo_Studio.git
 cd 20_AI_Product_Photo_Studio
-```
 
-### 2. Create a virtual environment
+If your repository uses a different URL or folder name, replace the values above accordingly.
 
-```bash
+2. Create a virtual environment
+
+On Windows:
+
 python -m venv venv
-```
-
-### 3. Activate the environment
-
-Windows:
-
-```bash
 venv\Scripts\activate
-```
 
-macOS or Linux:
+On macOS or Linux:
 
-```bash
+python -m venv venv
 source venv/bin/activate
-```
 
-### 4. Install the dependencies
+3. Install the dependencies
 
-```bash
 pip install -r requirements.txt
-```
 
-### 5. Add the Hugging Face token
+4. Configure environment variables
 
-Create a `.env` file:
+Create a .env file in the project directory:
 
-### 6. Run the application
+HF_TOKEN=your_hugging_face_token
+CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
+CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
 
-```bash
+The Hugging Face token is used when downloading the SAM 2 model. The Cloudflare credentials are required for AI background generation.
+
+Never commit .env or .streamlit/secrets.toml to GitHub.
+
+5. Run the application
+
 streamlit run app.py
-```
 
-## 🧪 Real-World Testing
+Then open http://localhost:8501 in your browser.
 
-The application was tested using products with different visual properties:
+Streamlit Community Cloud Deployment
 
-- A rectangular product package with clearly defined edges
-- A transparent perfume bottle with reflections and curved details
+Add the following values to App settings → Secrets in Streamlit Community Cloud:
 
-The system successfully preserved the products and placed them into newly generated scenes.
+HF_TOKEN = "your_hugging_face_token"
+CLOUDFLARE_API_TOKEN = "your_cloudflare_api_token"
+CLOUDFLARE_ACCOUNT_ID = "your_cloudflare_account_id"
 
-## ⚠️ Limitations
+Keep all tokens private. The deployed application reads them as environment variables and does not display them to users.
 
-- Objects touching the product may be included in the foreground mask.
-- Transparent and reflective products are more difficult to segment accurately.
-- AI-generated backgrounds may not follow every prompt instruction.
-- Product placement must sometimes be adjusted manually to match the surface.
-- Background generation requires a Hugging Face token and available inference credits.
-- Lighting adjustments improve the composition but do not perform full physical relighting.
+Usage Tips
 
-## 🔮 Possible Future Improvements
+Click clearly inside the product rather than on the surrounding background.
 
-- Interactive foreground-mask correction
-- Automatic surface detection
-- More advanced colour and lighting harmonisation
-- Directional shadows based on scene lighting
-- Batch product-photo processing
+Use points across different product areas when the object contains separate shapes or complex edges.
 
-## 📌 Project Status
+Choose Top-down for flat-lay food and tabletop products.
 
-Core development completed. Deployment and final visual documentation are in progress.
+Choose Upright for bottles, electronics, toys, cosmetics, and standing products.
 
-## 👩‍💻 Author
+Adjust the vertical position and shadow controls so the product appears to rest naturally on the generated surface.
 
-**Shwe Yamin Oo**  
-Data Science Graduate
+If an AI background includes an unwanted object, generate another variation and select it from the background history.
+
+Output Formats
+
+Format
+
+Resolution
+
+Square — Instagram
+
+1080 × 1080
+
+Portrait — Instagram
+
+1080 × 1350
+
+Story — Instagram/TikTok
+
+1080 × 1920
+
+Landscape — Website
+
+1200 × 800
+
+Limitations
+
+Segmentation quality depends on the selected points, image clarity, and contrast between the product and its original background.
+
+Transparent, reflective, furry, or unusually shaped products may require additional selection points.
+
+AI-generated backgrounds can occasionally contain unwanted objects or imperfect surfaces.
+
+Initial startup may take longer while the SAM 2 model is downloaded and loaded.
+
+Background generation depends on Cloudflare Workers AI availability and account usage limits.
+
+Future Improvements
+
+Negative selection points for excluding unwanted regions
+
+More precise mask refinement controls
+
+Automatic lighting and colour matching between the product and background
+
+Additional background styles and product-specific presets
+
+Faster model loading and inference optimization
+
+Author
+
+Created by Yamin as Project 20 of the 23 Projects at 23 portfolio challenge.
+
+GitHub: ChristineYamin
+
+Live application: AI Product Photo Studio
