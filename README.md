@@ -1,88 +1,53 @@
-📸 AI Product Photo Studio
+## 📸 AI Product Photo Studio
 
 AI Product Photo Studio is a Streamlit application that transforms ordinary product photos into polished promotional images. Users select a product with guided clicks, remove its original background using SAM 2, generate a new AI background, and fine-tune the final composition through interactive photo controls.
 
 🔗 Live app: project20-photo-studio.streamlit.app
 
-Overview
+## Overview
 
 Creating clean product photography normally requires a studio, careful lighting, and manual editing. This project provides a simpler workflow inside one web application:
+1. Upload a product image.
+2. Click at least two areas inside the product.
+3. Let SAM 2 isolate the selected object.
+4. Choose the product type, camera view, and background style.
+5. Generate an empty AI background with Cloudflare Workers AI.
+6. Adjust the product and download the completed promotional image.
 
-Upload a product image.
+## Features
+- Guided product selection with visible, numbered click points
+- SAM 2 segmentation for interactive background removal
+- AI background generation through Cloudflare Workers AI and FLUX.1 Schnell
+- Upright and top-down compositions for products and food photography
+- Product-aware background prompts for perfume, cosmetics, jewellery, food, beverages, electronics, toys, fashion accessories, and other products
+- Multiple visual styles, including Luxury, Studio, Cinematic, Showroom, Nature, Café, Playful, Rustic, and Futuristic
+- Generated background history with up to three recent alternatives
+- Solid-colour background option
+- Interactive photo controls for size, position, brightness, contrast, saturation, sharpness, shadow strength, and shadow softness
+- Multiple export formats for Instagram, TikTok, stories, and websites
+- Before-and-final comparison with equally sized previews
+- PNG download of the finished product image
+- Responsive Streamlit interface with a custom playful visual theme
 
-Click at least two areas inside the product.
+## Technology Stack
 
-Let SAM 2 isolate the selected object.
+Component   --------   Technology
 
-Choose the product type, camera view, and background style.
+User interface -------- Streamlit
 
-Generate an empty AI background with Cloudflare Workers AI.
+Product segmentation --------Meta SAM 2 via Hugging Face Transformers
 
-Adjust the product and download the completed promotional image.
+Background generation--------Cloudflare Workers AI — FLUX.1 Schnell
 
-Features
+Image processing--------Pillow
 
-Guided product selection with visible, numbered click points
+Deep-learning runtime--------PyTorch
 
-SAM 2 segmentation for interactive background removal
+Interactive selection--------streamlit-image-coordinates
 
-AI background generation through Cloudflare Workers AI and FLUX.1 Schnell
+HTTP communication--------Requests
 
-Upright and top-down compositions for products and food photography
-
-Product-aware background prompts for perfume, cosmetics, jewellery, food, beverages, electronics, toys, fashion accessories, and other products
-
-Multiple visual styles, including Luxury, Studio, Cinematic, Showroom, Nature, Café, Playful, Rustic, and Futuristic
-
-Generated background history with up to three recent alternatives
-
-Solid-colour background option
-
-Interactive photo controls for size, position, brightness, contrast, saturation, sharpness, shadow strength, and shadow softness
-
-Multiple export formats for Instagram, TikTok, stories, and websites
-
-Before-and-final comparison with equally sized previews
-
-PNG download of the finished product image
-
-Responsive Streamlit interface with a custom playful visual theme
-
-Technology Stack
-
-Component
-
-Technology
-
-User interface
-
-Streamlit
-
-Product segmentation
-
-Meta SAM 2 via Hugging Face Transformers
-
-Background generation
-
-Cloudflare Workers AI — FLUX.1 Schnell
-
-Image processing
-
-Pillow
-
-Deep-learning runtime
-
-PyTorch
-
-Interactive selection
-
-streamlit-image-coordinates
-
-HTTP communication
-
-Requests
-
-Application Workflow
+## Application Workflow
 
 flowchart TD
     A[Upload product photo] --> B[Click inside the product]
@@ -92,7 +57,7 @@ flowchart TD
     E --> F[Position and enhance product]
     F --> G[Compare and download result]
 
-Installation
+## Installation
 
 1. Clone the repository
 
@@ -145,7 +110,7 @@ CLOUDFLARE_ACCOUNT_ID = "your_cloudflare_account_id"
 
 Keep all tokens private. The deployed application reads them as environment variables and does not display them to users.
 
-Usage Tips
+## Usage Tips
 
 Click clearly inside the product rather than on the surrounding background.
 
@@ -159,29 +124,19 @@ Adjust the vertical position and shadow controls so the product appears to rest 
 
 If an AI background includes an unwanted object, generate another variation and select it from the background history.
 
-Output Formats
+## Output Formats
 
-Format
+Format   -   Resolution
 
-Resolution
+Square — Instagram  1080 × 1080
 
-Square — Instagram
+Portrait — Instagram   1080 × 1350
 
-1080 × 1080
+Story — Instagram/TikTok   1080 × 1920
 
-Portrait — Instagram
+Landscape — Website  1200 × 800
 
-1080 × 1350
-
-Story — Instagram/TikTok
-
-1080 × 1920
-
-Landscape — Website
-
-1200 × 800
-
-Limitations
+## Limitations
 
 Segmentation quality depends on the selected points, image clarity, and contrast between the product and its original background.
 
@@ -193,7 +148,7 @@ Initial startup may take longer while the SAM 2 model is downloaded and loaded.
 
 Background generation depends on Cloudflare Workers AI availability and account usage limits.
 
-Future Improvements
+## Future Improvements
 
 Negative selection points for excluding unwanted regions
 
@@ -205,7 +160,7 @@ Additional background styles and product-specific presets
 
 Faster model loading and inference optimization
 
-Author
+## Author
 
 Created by Yamin as Project 20 of the 23 Projects at 23 portfolio challenge.
 

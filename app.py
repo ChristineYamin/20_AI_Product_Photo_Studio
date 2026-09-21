@@ -760,7 +760,7 @@ with ai_tab:
         "Showroom",
         "Nature",
         "Café",
-        "Minimal"
+        "Minimal",
         "Playful",
         "Rustic",
         "Futuristic",
